@@ -1,0 +1,17 @@
+# Local configuration — contains DB credentials, never commit this
+config.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+venv/
+.venv/
+
+# Streamlit cache
+.streamlit/
+
+# OS
+.DS_Store
+Thumbs.db
