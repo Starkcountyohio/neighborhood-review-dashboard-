@@ -33,10 +33,10 @@ SALE_YEAR_END   = 2026
 # IasWorld PARDAT.CLASS values for residential and condo.
 PROPERTY_CLASSES = ("R", "C")
 
-# ── Arm's Length Sale Flag ────────────────────────────────────────────────────
-# The SALETYPE value in IasWorld SALES that identifies arm's length transfers.
-# Verify this matches your CAMA configuration. Common values: "A", "0", "1"
-ARMS_LENGTH_SALETYPE = "A"
+# ── Arm's Length Sale Filter ──────────────────────────────────────────────────
+# SALEVAL values on the SALES table that identify arm's length transactions.
+# Stark County: '0' and '1' are arm's length.
+ARMS_LENGTH_SALEVAL = ("0", "1")
 
 # ── DWELDAT Area Field ────────────────────────────────────────────────────────
 # DWELDAT column for finished living area (sq ft).
