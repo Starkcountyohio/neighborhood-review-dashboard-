@@ -47,6 +47,7 @@ from config import (
     TAX_YEAR,
     SALE_YEAR_START,
     SALE_YEAR_END,
+    NBHD_PREFIXES,
     PROPERTY_CLASSES,
     ARMS_LENGTH_SALEVAL,
     AREA_FIELD,
@@ -101,15 +102,15 @@ def _run(sql: str, params: dict) -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def get_neighborhoods(tax_year: str) -> list[str]:
-    """Return a sorted list of neighborhood codes for the given tax year."""
-    class_list = ", ".join(f"'{c}'" for c in PROPERTY_CLASSES)
+    """Return a sorted list of RS/RC neighborhood codes for the given tax year."""
+    prefix_filter = " OR ".join(f"nbhd LIKE '{p}%'" for p in NBHD_PREFIXES)
     sql = f"""
         SELECT DISTINCT nbhd
         FROM   {SCHEMA}pardat
         WHERE  taxyr     = :tax_year
           AND  cur       = 'Y'
           AND  deactivat IS NULL
-          AND  class     IN ({class_list})
+          AND  ({prefix_filter})
         ORDER BY nbhd
     """
     df = _run(sql, {"tax_year": int(tax_year)})
@@ -150,9 +151,16 @@ def get_parcels(nbhd: str, tax_year: str) -> pd.DataFrame:
         LEFT JOIN  {SCHEMA}dweldat d
                ON  d.parid     = p.parid
               AND  d.taxyr     = :tax_year
-              AND  d.card      = 1
               AND  d.cur       = 'Y'
               AND  d.deactivat IS NULL
+              AND  d.card      = (
+                       SELECT MIN(d2.card)
+                       FROM   {SCHEMA}dweldat d2
+                       WHERE  d2.parid     = p.parid
+                         AND  d2.taxyr     = :tax_year
+                         AND  d2.cur       = 'Y'
+                         AND  d2.deactivat IS NULL
+                   )
         LEFT JOIN  {SCHEMA}aprval  av
                ON  av.parid    = p.parid
               AND  av.taxyr    = :tax_year
@@ -170,61 +178,68 @@ def get_parcels(nbhd: str, tax_year: str) -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def get_sales(nbhd: str) -> pd.DataFrame:
     """
-    Return arm's length sales within the configured date range for a neighborhood.
-    Appraised values come from the current TAX_YEAR APRVAL record —
-    this is correct for ratio study: current values vs. historical sale prices.
+    Return arm's length sales from IASWORLD.SALES_SUMMARY for a neighborhood.
 
-    Multiple sales of the same parcel within the date range are all returned;
-    each is an independent observation in the ratio study.
+    SALES_SUMMARY is a staff-reviewed, locked view used for market model analysis.
+    It is the authoritative source for arm's length sale records.
 
-    Note: SALES has no TAXYR column — it is a sale event table keyed by
-    PARID + SALEDT + SEQ. The PARDAT/APRVAL joins use TAX_YEAR for current values.
+    Appraised values (APRTOT, APRLAND, APRBLDG) come from the current TAX_YEAR
+    APRVAL record so all sales are compared against consistent current-year values.
+
+    SALES_SUMMARY.RES_SFLA is used for square footage (already calculated in view).
+    Multiple sales of the same parcel are each independent ratio study observations.
     """
+    saleval_list = ", ".join(f"'{v}'" for v in ARMS_LENGTH_SALEVAL)
     sql = f"""
         SELECT
-            p.parid,
+            ss.sum_parid                           AS parid,
             TRIM(p.adrno)
                 || ' ' || TRIM(p.adrstr)
                 || CASE
                        WHEN p.adrsuf IS NOT NULL
                        THEN ' ' || TRIM(p.adrsuf)
                        ELSE ''
-                   END                              AS address,
-            s.saledt,
-            s.price,
-            s.instruno,
+                   END                             AS address,
+            ss.saledt,
+            ss.price,
+            ss.transno                             AS instruno,
             av.aprtot,
             av.aprland,
             av.aprbldg,
-            d.{AREA_FIELD}                         AS sfla,
+            ss.res_sfla                            AS sfla,
             d.grade,
             d.cdu,
             d.yrblt
-        FROM       {SCHEMA}sales   s
-        JOIN       {SCHEMA}pardat  p
-               ON  p.parid     = s.parid
-              AND  p.taxyr     = :tax_year
-              AND  p.cur       = 'Y'
-              AND  p.deactivat IS NULL
-        JOIN       {SCHEMA}aprval  av
-               ON  av.parid    = s.parid
-              AND  av.taxyr    = :tax_year
-              AND  av.cur      = 'Y'
+        FROM       {SCHEMA}sales_summary ss
+        JOIN       {SCHEMA}pardat        p
+               ON  p.parid      = ss.sum_parid
+              AND  p.taxyr      = :tax_year
+              AND  p.cur        = 'Y'
+              AND  p.deactivat  IS NULL
+        JOIN       {SCHEMA}aprval        av
+               ON  av.parid     = ss.sum_parid
+              AND  av.taxyr     = :tax_year
+              AND  av.cur       = 'Y'
               AND  av.deactivat IS NULL
-        LEFT JOIN  {SCHEMA}dweldat d
-               ON  d.parid     = s.parid
-              AND  d.taxyr     = :tax_year
-              AND  d.card      = 1
-              AND  d.cur       = 'Y'
-              AND  d.deactivat IS NULL
-        WHERE  p.nbhd      = :nbhd
-          AND  s.saledt   >= TO_DATE(:start_dt, 'YYYY-MM-DD')
-          AND  s.saledt    < TO_DATE(:end_dt,   'YYYY-MM-DD')
-          AND  s.price     > 0
-          AND  s.saleval  IN ({", ".join(f"'{v}'" for v in ARMS_LENGTH_SALEVAL)})
-          AND  s.cur       = 'Y'
-          AND  s.deactivat IS NULL
-        ORDER BY s.saledt DESC
+        LEFT JOIN  {SCHEMA}dweldat       d
+               ON  d.parid      = ss.sum_parid
+              AND  d.taxyr      = :tax_year
+              AND  d.cur        = 'Y'
+              AND  d.deactivat  IS NULL
+              AND  d.card       = (
+                       SELECT MIN(d2.card)
+                       FROM   {SCHEMA}dweldat d2
+                       WHERE  d2.parid     = ss.sum_parid
+                         AND  d2.taxyr     = :tax_year
+                         AND  d2.cur       = 'Y'
+                         AND  d2.deactivat IS NULL
+                   )
+        WHERE  p.nbhd       = :nbhd
+          AND  ss.saledt   >= TO_DATE(:start_dt, 'YYYY-MM-DD')
+          AND  ss.saledt    < TO_DATE(:end_dt,   'YYYY-MM-DD')
+          AND  ss.price     > 0
+          AND  ss.saleval   IN ({saleval_list})
+        ORDER BY ss.saledt DESC
     """
     return _run(sql, {
         "nbhd":     nbhd,

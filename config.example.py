@@ -27,7 +27,12 @@ TAX_YEAR = "2026"
 
 # ── Sale Date Range ───────────────────────────────────────────────────────────
 SALE_YEAR_START = 2024
-SALE_YEAR_END   = 2026
+SALE_YEAR_END   = 2025   # sales < 1/1/2026 for 2027 triennial analysis
+
+# ── Neighborhood Prefix Filter ────────────────────────────────────────────────
+# Only show neighborhoods whose code starts with one of these prefixes.
+# RS = Residential Single-family, RC = Residential Condo
+NBHD_PREFIXES = ("RS", "RC", "AG")
 
 # ── Property Class Filter ─────────────────────────────────────────────────────
 # IasWorld PARDAT.CLASS values for residential and condo.

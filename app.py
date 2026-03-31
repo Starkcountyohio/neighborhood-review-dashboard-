@@ -118,9 +118,24 @@ st.caption(
     f"{sd_threshold:.1f} SD from the neighborhood mean."
 )
 
+# ── LUC Filter ────────────────────────────────────────────────────────────────
+
+available_lucs = sorted(parcels_df["luc"].dropna().unique().tolist())
+selected_lucs = st.multiselect(
+    "Filter by LUC",
+    options=available_lucs,
+    default=available_lucs,
+    help="Land Use Codes present in this neighborhood. Deselect to exclude parcels.",
+)
+
+if selected_lucs:
+    parcels_filtered = parcels_df[parcels_df["luc"].isin(selected_lucs)].copy()
+else:
+    parcels_filtered = parcels_df.copy()
+
 # ── Uniformity Stats Row ──────────────────────────────────────────────────────
 
-u_stats = compute_uniformity_stats(parcels_df)
+u_stats = compute_uniformity_stats(parcels_filtered)
 
 if "error" not in u_stats:
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -154,7 +169,7 @@ else:
 
 # ── Build Upper Panel DataFrame ───────────────────────────────────────────────
 
-disp = parcels_df.copy()
+disp = parcels_filtered.copy()
 
 # Compute AV per sqft
 area_ok = (disp["sfla"].fillna(0) > 0) & (disp["aprtot"].fillna(0) > 0)
