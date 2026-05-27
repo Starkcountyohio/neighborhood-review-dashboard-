@@ -12,6 +12,9 @@ venv/
 # Streamlit cache
 .streamlit/
 
+# Claude Code machine-specific settings
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db
