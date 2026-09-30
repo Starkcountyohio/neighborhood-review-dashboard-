@@ -22,7 +22,9 @@ import numpy as np
 import statsmodels.api as sm
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-from config import DB_CONFIG, SCHEMA, TAX_YEAR, NBHD_PREFIXES, AREA_FIELD
+from oracle_conn import connect
+
+from config import DB_CONFIG, TAX_YEAR, NBHD_PREFIXES, AREA_FIELD
 
 # ── Grade → numeric rank ──────────────────────────────────────────────────────
 
@@ -62,15 +64,15 @@ SQL_PARCELS = f"""
         d.fixbath,
         d.fixhalf,
         d.heat
-    FROM       {SCHEMA}pardat  p
-    JOIN       {SCHEMA}dweldat d
+    FROM       pardat  p
+    JOIN       dweldat d
            ON  d.parid     = p.parid
           AND  d.taxyr     = :tax_year
           AND  d.cur       = 'Y'
           AND  d.deactivat IS NULL
           AND  d.card      = (
                    SELECT MIN(d2.card)
-                   FROM   {SCHEMA}dweldat d2
+                   FROM   dweldat d2
                    WHERE  d2.parid     = p.parid
                      AND  d2.taxyr     = :tax_year
                      AND  d2.cur       = 'Y'
@@ -89,13 +91,16 @@ SQL_PARCELS = f"""
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def discover_columns(conn, table: str) -> list[str]:
-    """Return uppercase column names for a table in the configured schema."""
-    owner = SCHEMA.rstrip(".").upper()
+    """Return uppercase column names for a table, resolved via its PUBLIC synonym."""
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT column_name FROM all_tab_columns "
-            "WHERE table_name = :tbl AND owner = :own ORDER BY column_id",
-            {"tbl": table.upper(), "own": owner},
+            "SELECT c.column_name "
+            "FROM   all_synonyms s "
+            "JOIN   all_tab_columns c "
+            "       ON c.owner = s.table_owner AND c.table_name = s.table_name "
+            "WHERE  s.owner = 'PUBLIC' AND s.synonym_name = :tbl "
+            "ORDER BY c.column_id",
+            {"tbl": table.upper()},
         )
         return [row[0].upper() for row in cur.fetchall()]
 
@@ -186,7 +191,7 @@ def main():
 
     print(f"\nConnecting to {DB_CONFIG['dsn']} …")
     try:
-        conn = oracledb.connect(**DB_CONFIG)
+        conn = connect()
     except oracledb.Error as exc:
         sys.exit(f"Connection failed: {exc}")
 
@@ -241,7 +246,7 @@ def main():
                     a."SECOND",
                     a."THIRD",
                     a.area
-                FROM {SCHEMA}addn a
+                FROM addn a
                 WHERE a.taxyr      = :tax_year
                   AND a.card       = 1
                   AND a.{lline_col} > 0

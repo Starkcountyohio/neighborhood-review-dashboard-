@@ -41,9 +41,8 @@ import oracledb
 import pandas as pd
 import streamlit as st
 
+from oracle_conn import connect
 from config import (
-    DB_CONFIG,
-    SCHEMA,
     TAX_YEAR,
     SALE_YEAR_START,
     SALE_YEAR_END,
@@ -67,8 +66,8 @@ def _get_connection() -> oracledb.Connection:
     Click 'Refresh Data' in the sidebar to re-establish if the connection drops.
     """
     try:
-        return oracledb.connect(**DB_CONFIG)
-    except oracledb.Error as exc:
+        return connect()
+    except (oracledb.Error, RuntimeError) as exc:
         st.error(
             f"**Database connection failed.**\n\n"
             f"{exc}\n\n"
@@ -105,13 +104,13 @@ def get_infl_codes() -> dict:
     """
     Return a dict mapping INFL1 code → description from the IasWorld code master.
 
-    Queries IASWORLD.CODMST where CODETBL = 'INFL'.
+    Queries CODMST where CODETBL = 'INFL'.
     Result is cached for 1 hour (codes rarely change mid-session).
     Returns an empty dict on failure so callers degrade gracefully.
     """
     sql = f"""
         SELECT code, TRIM(decode) AS decode
-        FROM   {SCHEMA}codmst
+        FROM   codmst
         WHERE  codetbl = 'INFL'
         ORDER BY code
     """
@@ -128,7 +127,7 @@ def get_neighborhoods(tax_year: str) -> list[str]:
     prefix_filter = " OR ".join(f"nbhd LIKE '{p}%'" for p in NBHD_PREFIXES)
     sql = f"""
         SELECT DISTINCT nbhd
-        FROM   {SCHEMA}pardat
+        FROM   pardat
         WHERE  taxyr     = :tax_year
           AND  cur       = 'Y'
           AND  deactivat IS NULL
@@ -178,21 +177,21 @@ def get_parcels(nbhd: str, tax_year: str) -> pd.DataFrame:
             av.aprland,
             av.aprbldg,
             av.aprtot
-        FROM       {SCHEMA}pardat  p
-        LEFT JOIN  {SCHEMA}dweldat d
+        FROM       pardat  p
+        LEFT JOIN  dweldat d
                ON  d.parid     = p.parid
               AND  d.taxyr     = :tax_year
               AND  d.cur       = 'Y'
               AND  d.deactivat IS NULL
               AND  d.card      = (
                        SELECT MIN(d2.card)
-                       FROM   {SCHEMA}dweldat d2
+                       FROM   dweldat d2
                        WHERE  d2.parid     = p.parid
                          AND  d2.taxyr     = :tax_year
                          AND  d2.cur       = 'Y'
                          AND  d2.deactivat IS NULL
                    )
-        LEFT JOIN  {SCHEMA}aprval  av
+        LEFT JOIN  aprval  av
                ON  av.parid    = p.parid
               AND  av.taxyr    = :tax_year
               AND  av.cur      = 'Y'
@@ -209,7 +208,7 @@ def get_parcels(nbhd: str, tax_year: str) -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def get_sales(nbhd: str) -> pd.DataFrame:
     """
-    Return arm's length sales from IASWORLD.SALES_SUMMARY for a neighborhood.
+    Return arm's length sales from SALES_SUMMARY for a neighborhood.
 
     SALES_SUMMARY is a staff-reviewed, locked view used for market model analysis.
     It is the authoritative source for arm's length sale records.
@@ -242,20 +241,20 @@ def get_sales(nbhd: str) -> pd.DataFrame:
             d.grade,
             d.cdu,
             d.yrblt
-        FROM       {SCHEMA}sales_summary ss
-        JOIN       {SCHEMA}pardat        p
+        FROM       sales_summary ss
+        JOIN       pardat        p
                ON  p.parid      = ss.sum_parid
               AND  p.taxyr      = :tax_year
               AND  p.cur        = 'Y'
               AND  p.deactivat  IS NULL
-        LEFT JOIN  {SCHEMA}dweldat       d
+        LEFT JOIN  dweldat       d
                ON  d.parid      = ss.sum_parid
               AND  d.taxyr      = :tax_year
               AND  d.cur        = 'Y'
               AND  d.deactivat  IS NULL
               AND  d.card       = (
                        SELECT MIN(d2.card)
-                       FROM   {SCHEMA}dweldat d2
+                       FROM   dweldat d2
                        WHERE  d2.parid     = ss.sum_parid
                          AND  d2.taxyr     = :tax_year
                          AND  d2.cur       = 'Y'
@@ -317,13 +316,13 @@ def get_land_data(nbhd: str, tax_year: str) -> pd.DataFrame:
             l.influ2,
             l.price                               AS land_price,
             av.aprland
-        FROM       {SCHEMA}land    l
-        JOIN       {SCHEMA}pardat  p
+        FROM       land    l
+        JOIN       pardat  p
                ON  p.parid     = l.parid
               AND  p.taxyr     = :tax_year
               AND  p.cur       = 'Y'
               AND  p.deactivat IS NULL
-        LEFT JOIN  {SCHEMA}aprval  av
+        LEFT JOIN  aprval  av
                ON  av.parid    = l.parid
               AND  av.taxyr    = :tax_year
               AND  av.cur      = 'Y'
@@ -361,8 +360,8 @@ def get_nbhd_summary(tax_year: str) -> pd.DataFrame:
                 p.nbhd,
                 COUNT(*)                                                           AS n_parcels,
                 ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY av.aprtot), 0)  AS median_av
-            FROM   {SCHEMA}pardat  p
-            LEFT JOIN {SCHEMA}aprval av
+            FROM   pardat  p
+            LEFT JOIN aprval av
                    ON  av.parid     = p.parid
                   AND  av.taxyr     = :tax_year
                   AND  av.cur       = 'Y'
@@ -379,8 +378,8 @@ def get_nbhd_summary(tax_year: str) -> pd.DataFrame:
                 ss.aprtot / ss.price  AS ratio,
                 ss.aprtot             AS aprtot,
                 ss.price              AS price
-            FROM   {SCHEMA}sales_summary ss
-            JOIN   {SCHEMA}pardat        p
+            FROM   sales_summary ss
+            JOIN   pardat        p
                    ON  p.parid      = ss.sum_parid
                   AND  p.taxyr      = :tax_year
                   AND  p.cur        = 'Y'
@@ -456,8 +455,8 @@ def get_market_values(nbhd: str, tax_year: str) -> pd.DataFrame:
             sc.fcc,
             sc.dist1,  sc.dist2,  sc.dist3,  sc.dist4,  sc.dist5,
             sc.exadj1, sc.exadj2, sc.exadj3, sc.exadj4, sc.exadj5
-        FROM       {SCHEMA}subjcomp sc
-        JOIN       {SCHEMA}pardat   p
+        FROM       subjcomp sc
+        JOIN       pardat   p
                ON  p.parid     = sc.parid
               AND  p.taxyr     = :tax_year
               AND  p.cur       = 'Y'
@@ -502,15 +501,15 @@ def get_grade_model_data() -> pd.DataFrame:
             d.fixbath,
             d.fixhalf,
             d.heat
-        FROM       {SCHEMA}pardat  p
-        JOIN       {SCHEMA}dweldat d
+        FROM       pardat  p
+        JOIN       dweldat d
                ON  d.parid     = p.parid
               AND  d.taxyr     = :tax_year
               AND  d.cur       = 'Y'
               AND  d.deactivat IS NULL
               AND  d.card      = (
                        SELECT MIN(d2.card)
-                       FROM   {SCHEMA}dweldat d2
+                       FROM   dweldat d2
                        WHERE  d2.parid     = p.parid
                          AND  d2.taxyr     = :tax_year
                          AND  d2.cur       = 'Y'
@@ -540,7 +539,7 @@ def get_grade_model_data() -> pd.DataFrame:
                        OR a."SECOND" IN ({amenity_codes})
                        OR a."THIRD"  IN ({amenity_codes})
                      THEN 1 ELSE 0 END) AS amenity_count
-        FROM {SCHEMA}addn a
+        FROM addn a
         WHERE a.taxyr     = :tax_year
           AND a.card      = 1
           AND a.lline     > 0
@@ -579,8 +578,8 @@ def get_frontage_summary(tax_year: str) -> pd.DataFrame:
                 p.nbhd,
                 l.parid,
                 SUM(l.fronact) AS total_fronact
-            FROM   {SCHEMA}land    l
-            JOIN   {SCHEMA}pardat  p
+            FROM   land    l
+            JOIN   pardat  p
                    ON  p.parid     = l.parid
                   AND  p.taxyr     = :tax_year
                   AND  p.cur       = 'Y'

@@ -11,19 +11,28 @@ SETUP INSTRUCTIONS:
 # Use the same username/password you use in SQL Developer.
 # No Oracle Instant Client required (oracledb thin mode).
 #
-# DSN format: "hostname:port/service_name"
-# The DSN below is the Stark County IasWorld production server — leave as-is
+# DSN format: "tcps://hostname:port/service_name" (TLS, no wallet required)
+# The DSN below is the Tyler cloud iasWorld server — leave as-is
 # unless you're pointing at a different environment (test, dev, etc.).
 
 DB_CONFIG = {
     "user":     "your_oracle_username",
     "password": "your_oracle_password",
-    "dsn":      "iaswdbs.starkcountyohio.gov:1521/IASW",
+    "dsn":      "tcps://starkcountyoh.sc.atentcloud.tylerapp.com:40034/orcl",
 }
 
+# Previous on-prem server:
+# DB_CONFIG = {
+#     "user":     "your_oracle_username",
+#     "password": "your_oracle_password",
+#     "dsn":      "iaswdbs.starkcountyohio.gov:1521/IASW",
+# }
+
 # ── IasWorld Schema ───────────────────────────────────────────────────────────
-# Table prefix including trailing dot. Common values: "IASWORLD."  "PTIUSER."  ""
-SCHEMA = "IASWORLD."
+# Tables are owned by STARKCOUNTYOH_IAS and reached through PUBLIC synonyms,
+# so queries use unqualified table names (no schema prefix).
+# Previous on-prem setting:
+# SCHEMA = "IASWORLD."
 
 # ── Assessment Year ───────────────────────────────────────────────────────────
 TAX_YEAR = "2026"
